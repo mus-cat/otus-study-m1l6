@@ -1,0 +1,31 @@
+---
+- name: Deploy NFS Client
+  hosts: all
+  become: yes
+  vars:
+    ansible_python_interpreter: /usr/bin/python3.7
+
+
+  tasks:
+    - name: Install NFS Clent
+      apt:
+        name: nfs-common
+        state: present
+
+    - name: Prepare fstab for automount NFS
+      ansible.posix.mount:
+        fstype: nfs
+        opts: proto=udp,vers=3
+        path: /mnt
+        src: 192.168.56.10:/home/exportdir
+        state: mounted
+
+    - name: Copy file with Firewall rule
+      copy:
+        dest: nfsClFW.rule
+        src: nfsClFW.rule
+
+    - name: Applay iptables rules
+      shell:
+        cmd: iptables-restore nfsClFW.rule
+

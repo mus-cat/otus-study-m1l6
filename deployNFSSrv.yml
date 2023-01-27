@@ -1,0 +1,93 @@
+---
+- name: Deploy NFS Server
+  hosts: all
+  become: yes
+  gather_facts: no
+  vars:
+    ansible_python_interpreter: /usr/bin/python3.7
+
+  tasks:
+    - name: Install NFS Server
+      apt:
+        name:
+          - nfs-kernel-server
+          - krb5-admin-server
+          - krb5-kdc
+        state: present
+
+    - name: Make high-level directory
+      file:
+        name: /home/exportdir
+        state: directory
+        owner: root
+        group: root
+        mode: '1775'
+
+    - name: Make subdirectory with write permission
+      file:
+        name: /home/exportdir/__upload__
+        state: directory
+        owner: nobody
+        group: nogroup
+        mode: '1777'
+
+    - name: Set line in /etc/exports
+      lineinfile:
+        name: /etc/exports
+        state: present
+        create: true
+        line: /home/exportdir *(rw,no_subtree_check,root_squash)
+      notify:
+        - restart nfssrv
+
+    - name: Set static ports for statd
+      lineinfile:
+        name: /etc/default/nfs-common
+        state: present
+        regexp: ^STATDOPTS=
+        line: STATDOPTS="--port 33330 --outgoing-port 33331"
+      notify:
+        - restart nfssrv
+
+
+    - name: Set static port for mountd
+      lineinfile:
+        name: /etc/default/nfs-kernel-server
+        state: present
+        regexp: ^RPCMOUNTDOPTS=
+        line: RPCMOUNTDOPTS="--manage-gids --port 33332"
+      notify:
+        - restart nfssrv
+
+    - name: Set static ports for NLM
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/nfs-nlm-ports.conf
+        content: "fs.nfs.nlm_tcpport = 33333\nfs.nfs.nlm_udpport = 33333\n"
+      notify:
+        - restart nfssrv
+
+    - name: Reread config by sysctl
+      shell:
+        cmd: sysctl --system
+      notify:
+        - restart nfssrv
+
+    - name: Copy file with Firewall rule
+      copy:
+        dest: nfsSrvFW.rule
+        src: nfsSrvFW.rule
+
+    - name: Applay iptables rules
+      shell:
+        cmd: iptables-restore nfsSrvFW.rule
+
+  handlers:
+    - name: restart nfssrv
+      systemd:
+        name: "{{ item }}"
+        enabled: true
+        state: restarted
+        masked: false
+      loop:
+        - nfs-kernel-server
+          #        - nfs-mountd
